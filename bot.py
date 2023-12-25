@@ -1,17 +1,26 @@
 from telegram.ext import CommandHandler, CallbackContext, Application
 from telegram import Update
 from sclib import SoundcloudAPI, Track, Playlist
-import os 
+import os, logging
 from dotenv import load_dotenv
-load_dotenv()
 
+load_dotenv()
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("bot.log", encoding="utf-8")]
+)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 telegram_token = os.getenv('TELEGRAM_TOKEN')
 api = SoundcloudAPI()
 
 async def start(update: Update, context: CallbackContext) -> None:
+    logger.info(f"{update.message.from_user.name} used /start")
     await update.message.reply_text("Hello!\nSend me a link to a SoundCloud track using /soundcloud command and I will send you a file.")
 
 async def soundcloud(update: Update, context: CallbackContext) -> None:
+    logger.info(f"{update.message.from_user.name} used /soundcloud, args: {context.args}")
     chat_id = update.message.chat_id
     message_id = update.message.message_id
     if len(context.args) == 0:
@@ -27,15 +36,16 @@ async def soundcloud(update: Update, context: CallbackContext) -> None:
             title = resource.title.replace("/", "").replace("\\", "")
             artist = resource.artist.replace("/", "").replace("\\", "")
             if '/' or '\\' in resource.title and resource.artist:
-                filename = f'downloads/{artist} - {title}.mp3'
+                filename = f'{artist} - {title}.mp3'
             else:
-                filename = f'downloads/{resource.artist} - {resource.title}.mp3'
+                filename = f'{resource.artist} - {resource.title}.mp3'
             with open(filename, 'wb+') as fp:
                 resource.write_mp3_to(fp)
             await context.bot.send_audio(chat_id=chat_id, audio=open(filename, 'rb'), reply_to_message_id=message_id)
             os.remove(filename)
         except Exception as e:
             await update.message.reply_text(f'Error: {e}')
+            logger.error(f"Error: {e}")
             os.remove(filename)
     elif isinstance(resource, Playlist):
         try:
@@ -43,9 +53,9 @@ async def soundcloud(update: Update, context: CallbackContext) -> None:
                 title = track.title.replace("/", "").replace("\\", "")
                 artist = track.artist.replace("/", "").replace("\\", "")
                 if '/' or '\\' in track.title and track.artist:
-                    filename = f'downloads/{artist} - {title}.mp3'
+                    filename = f'{artist} - {title}.mp3'
                 else:
-                    filename = f'downloads/{track.artist} - {track.title}.mp3'
+                    filename = f'{track.artist} - {track.title}.mp3'
                 with open(filename, 'wb+') as fp:
                     track.write_mp3_to(fp)
                 await context.bot.send_audio(chat_id=chat_id, audio=open(filename, 'rb'), reply_to_message_id=message_id)
