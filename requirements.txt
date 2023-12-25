@@ -1,0 +1,3 @@
+soundcloud-lib
+python-telegram-bot
+python-dotenv
