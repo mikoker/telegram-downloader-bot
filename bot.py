@@ -1,7 +1,7 @@
 from telegram.ext import CommandHandler, CallbackContext, Application
 from telegram import Update
 from sclib import SoundcloudAPI, Track, Playlist
-import os, logging
+import os, logging, datetime
 from dotenv import load_dotenv
 from spotdl import Spotdl
 
@@ -16,11 +16,37 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 telegram_token = os.getenv('TELEGRAM_TOKEN')
 api = SoundcloudAPI()
 spotdl = Spotdl(client_id=os.getenv('SPOTIFY_CLIENT_ID'), client_secret=os.getenv('SPOTIFY_CLIENT_SECRET'))
+# https://stackoverflow.com/questions/61612236/python-telegram-bot-cooldown-function lol
+throttle_data = {
+    'minutes': 1,
+    'last_time': None
+}
+
+def throttle(func):
+    async def wrapper(*args, **kwargs):
+        now = datetime.datetime.now()
+        delta = now - datetime.timedelta(minutes=throttle_data.get('minutes', 1))
+        last_time = throttle_data.get('last_time')
+
+        if not last_time:
+            last_time = delta
+
+        if last_time <= delta:
+            throttle_data['last_time'] = now
+            await func(*args, **kwargs)
+        else:
+            await not_allowed(*args)
+
+    return wrapper
+
+async def not_allowed(update, context):
+    await update.message.reply_text(text="You are on cooldown, please wait a bit before using this command again.")
 
 async def start(update: Update, context: CallbackContext) -> None:
     logger.info(f"{update.message.from_user.name} used /start")
     await update.message.reply_text("Hello!\nI'm a bot that can download SoundCloud and Spotify tracks.\nUse /help for more info!\n\nMade by mikoker")
 
+@throttle
 async def spotify(update: Update, context: CallbackContext) -> None:
     logger.info(f"{update.message.from_user.name} used /spotify, args: {context.args}")
     chat_id = update.message.chat_id
@@ -44,6 +70,7 @@ async def spotify(update: Update, context: CallbackContext) -> None:
         await update.message.reply_text(f'Error: {e}')
         os.remove(path)
 
+@throttle
 async def soundcloud(update: Update, context: CallbackContext) -> None:
     logger.info(f"{update.message.from_user.name} used /soundcloud, args: {context.args}")
     chat_id = update.message.chat_id
@@ -91,6 +118,7 @@ async def soundcloud(update: Update, context: CallbackContext) -> None:
         await update.message.reply_text('This isn\'t a track or playlist')
 
 async def help(update: Update, context: CallbackContext) -> None:
+    logger.info(f"{update.message.from_user.name} used /help")
     commands = [
         '/start - Start the bot',
         '/soundcloud - Download a SoundCloud track or playlist (url)',
