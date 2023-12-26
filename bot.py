@@ -3,6 +3,7 @@ from telegram import Update
 from sclib import SoundcloudAPI, Track, Playlist
 import os, logging
 from dotenv import load_dotenv
+from spotdl import Spotdl
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -14,10 +15,34 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 telegram_token = os.getenv('TELEGRAM_TOKEN')
 api = SoundcloudAPI()
+spotdl = Spotdl(client_id=os.getenv('SPOTIFY_CLIENT_ID'), client_secret=os.getenv('SPOTIFY_CLIENT_SECRET'))
 
 async def start(update: Update, context: CallbackContext) -> None:
     logger.info(f"{update.message.from_user.name} used /start")
-    await update.message.reply_text("Hello!\nSend me a link to a SoundCloud track using /soundcloud command and I will send you a file.")
+    await update.message.reply_text("Hello!\nI'm a bot that can download SoundCloud and Spotify tracks.\nUse /help for more info!\n\nMade by mikoker")
+
+async def spotify(update: Update, context: CallbackContext) -> None:
+    logger.info(f"{update.message.from_user.name} used /spotify, args: {context.args}")
+    chat_id = update.message.chat_id
+    message_id = update.message.message_id
+
+    if len(context.args) == 0:
+        await update.message.reply_text("where link")
+        return
+
+    if not context.args[0].startswith('https://open.spotify.com/track/'):
+        await update.message.reply_text('This isn\'t a Spotify track link, use https://open.spotify.com/track/')
+        return
+
+    query = context.args.pop(0)
+    try:
+        songs = spotdl.search([query])
+        song, path = spotdl.downloader.search_and_download(songs[0])
+        await context.bot.send_audio(chat_id=chat_id, audio=open(path, 'rb'), reply_to_message_id=message_id)
+        os.remove(path)
+    except Exception as e:
+        await update.message.reply_text(f'Error: {e}')
+        os.remove(path)
 
 async def soundcloud(update: Update, context: CallbackContext) -> None:
     logger.info(f"{update.message.from_user.name} used /soundcloud, args: {context.args}")
@@ -65,9 +90,19 @@ async def soundcloud(update: Update, context: CallbackContext) -> None:
     else:
         await update.message.reply_text('This isn\'t a track or playlist')
 
+async def help(update: Update, context: CallbackContext) -> None:
+    commands = [
+        '/start - Start the bot',
+        '/soundcloud - Download a SoundCloud track or playlist (url)',
+        '/spotify - Download a Spotify track (url)'
+    ]
+    await update.message.reply_text('\n'.join(commands))
+
 def main() -> None:
     application = Application.builder().token(telegram_token).build()
     application.add_handler(CommandHandler('start', start))
+    application.add_handler(CommandHandler('help', help))
+    application.add_handler(CommandHandler('spotify', spotify))
     application.add_handler(CommandHandler('soundcloud', soundcloud))
     application.run_polling(allowed_updates=Update.ALL_TYPES)
     
