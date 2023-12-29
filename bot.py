@@ -1,7 +1,8 @@
 from telegram.ext import CommandHandler, CallbackContext, Application
 from telegram import Update
 from sclib import SoundcloudAPI, Track, Playlist
-import os, logging, datetime
+import os, logging
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from spotdl import Spotdl
 
@@ -16,28 +17,21 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 telegram_token = os.getenv('TELEGRAM_TOKEN')
 api = SoundcloudAPI()
 spotdl = Spotdl(client_id=os.getenv('SPOTIFY_CLIENT_ID'), client_secret=os.getenv('SPOTIFY_CLIENT_SECRET'))
+
 # https://stackoverflow.com/questions/61612236/python-telegram-bot-cooldown-function lol
-throttle_data = {
-    'minutes': 1,
-    'last_time': None
-}
-
-def throttle(func):
-    async def wrapper(*args, **kwargs):
-        now = datetime.datetime.now()
-        delta = now - datetime.timedelta(minutes=throttle_data.get('minutes', 1))
-        last_time = throttle_data.get('last_time')
-
-        if not last_time:
-            last_time = delta
-
-        if last_time <= delta:
-            throttle_data['last_time'] = now
-            await func(*args, **kwargs)
-        else:
-            await not_allowed(*args)
-
-    return wrapper
+def throttle(cooldown):
+    last_time = None
+    def decorator(func):
+        async def wrapper(*args, **kwargs):
+            nonlocal last_time
+            now = datetime.now()
+            if last_time is None or now - last_time > timedelta(seconds=cooldown):
+                last_time = now
+                await func(*args, **kwargs)
+            else:
+                await not_allowed(*args)
+        return wrapper
+    return decorator
 
 async def not_allowed(update, context):
     await update.message.reply_text(text="You are on cooldown, please wait a bit before using this command again.")
@@ -46,37 +40,36 @@ async def start(update: Update, context: CallbackContext) -> None:
     logger.info(f"{update.message.from_user.name} used /start")
     await update.message.reply_text("Hello!\nI'm a bot that can download SoundCloud and Spotify tracks.\nUse /help for more info!\n\nMade by mikoker")
 
-@throttle
+@throttle(cooldown=3600)
 async def spotify(update: Update, context: CallbackContext) -> None:
     logger.info(f"{update.message.from_user.name} used /spotify, args: {context.args}")
     chat_id = update.message.chat_id
     message_id = update.message.message_id
-
     if len(context.args) == 0:
-        await update.message.reply_text("where link")
+        await update.message.reply_text("Please provide a link. Example: /spotify https://open.spotify.com/track/")
         return
-
     if not context.args[0].startswith('https://open.spotify.com/track/'):
         await update.message.reply_text('This isn\'t a Spotify track link, use https://open.spotify.com/track/')
         return
-
     query = context.args.pop(0)
     try:
         songs = spotdl.search([query])
         song, path = spotdl.downloader.search_and_download(songs[0])
         await context.bot.send_audio(chat_id=chat_id, audio=open(path, 'rb'), reply_to_message_id=message_id)
-        os.remove(path)
     except Exception as e:
         await update.message.reply_text(f'Error: {e}')
         os.remove(path)
+    finally:
+        if os.path.exists(path):
+            os.remove(path)
 
-@throttle
+@throttle(cooldown=3600)
 async def soundcloud(update: Update, context: CallbackContext) -> None:
     logger.info(f"{update.message.from_user.name} used /soundcloud, args: {context.args}")
     chat_id = update.message.chat_id
     message_id = update.message.message_id
     if len(context.args) == 0:
-        await update.message.reply_text('where link')
+        await update.message.reply_text('Please provide a link. Example: /soundcloud https://soundcloud.com/artist/title or /soundcloud https://soundcloud.com/artist/sets/playlist')
         return
     soundcloud_url = context.args[0]
     if not soundcloud_url.startswith('https://soundcloud.com/') and not soundcloud_url.startswith('https://on.soundcloud.com/'):
@@ -93,12 +86,14 @@ async def soundcloud(update: Update, context: CallbackContext) -> None:
                 filename = f'{resource.artist} - {resource.title}.mp3'
             with open(filename, 'wb+') as fp:
                 resource.write_mp3_to(fp)
-            await context.bot.send_audio(chat_id=chat_id, audio=open(filename, 'rb'), reply_to_message_id=message_id)
-            os.remove(filename)
+            with open(filename, 'rb') as audio_file:
+                await context.bot.send_audio(chat_id=chat_id, audio=audio_file, reply_to_message_id=message_id)
         except Exception as e:
             await update.message.reply_text(f'Error: {e}')
             logger.error(f"Error: {e}")
-            os.remove(filename)
+        finally:
+            if os.path.exists(filename):
+                os.remove(filename)
     elif isinstance(resource, Playlist):
         try:
             for track in resource.tracks:
@@ -110,12 +105,15 @@ async def soundcloud(update: Update, context: CallbackContext) -> None:
                     filename = f'{track.artist} - {track.title}.mp3'
                 with open(filename, 'wb+') as fp:
                     track.write_mp3_to(fp)
-                await context.bot.send_audio(chat_id=chat_id, audio=open(filename, 'rb'), reply_to_message_id=message_id)
-                os.remove(filename)
+                with open(filename, 'rb') as audio_file:
+                    await context.bot.send_audio(chat_id=chat_id, audio=audio_file, reply_to_message_id=message_id)
         except Exception as e:
             await update.message.reply_text(f'Error: {e}')
+        finally:
+            if os.path.exists(filename):
+                os.remove(filename)
     else:
-        await update.message.reply_text('This isn\'t a track or playlist')
+        await update.message.reply_text('This is neither a track nor a playlist')
 
 async def help(update: Update, context: CallbackContext) -> None:
     logger.info(f"{update.message.from_user.name} used /help")
