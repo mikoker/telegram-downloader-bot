@@ -40,7 +40,7 @@ async def start(update: Update, context: CallbackContext) -> None:
     logger.info(f"{update.message.from_user.name} used /start")
     await update.message.reply_text("Hello!\nI'm a bot that can download SoundCloud and Spotify tracks.\nUse /help for more info!\n\nMade by mikoker")
 
-@throttle(cooldown=3600)
+@throttle(cooldown=120)
 async def spotify(update: Update, context: CallbackContext) -> None:
     logger.info(f"{update.message.from_user.name} used /spotify, args: {context.args}")
     chat_id = update.message.chat_id
@@ -55,15 +55,13 @@ async def spotify(update: Update, context: CallbackContext) -> None:
     try:
         songs = spotdl.search([query])
         song, path = spotdl.downloader.search_and_download(songs[0])
-        await context.bot.send_audio(chat_id=chat_id, audio=open(path, 'rb'), reply_to_message_id=message_id)
-    except Exception as e:
-        await update.message.reply_text(f'Error: {e}')
-        os.remove(path)
+        with open(path, 'rb') as audio_file: #retarded
+            await context.bot.send_audio(chat_id=chat_id, audio=audio_file, reply_to_message_id=message_id)
     finally:
         if os.path.exists(path):
             os.remove(path)
 
-@throttle(cooldown=3600)
+@throttle(cooldown=120)
 async def soundcloud(update: Update, context: CallbackContext) -> None:
     logger.info(f"{update.message.from_user.name} used /soundcloud, args: {context.args}")
     chat_id = update.message.chat_id
@@ -88,9 +86,6 @@ async def soundcloud(update: Update, context: CallbackContext) -> None:
                 resource.write_mp3_to(fp)
             with open(filename, 'rb') as audio_file:
                 await context.bot.send_audio(chat_id=chat_id, audio=audio_file, reply_to_message_id=message_id)
-        except Exception as e:
-            await update.message.reply_text(f'Error: {e}')
-            logger.error(f"Error: {e}")
         finally:
             if os.path.exists(filename):
                 os.remove(filename)
